@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  build: { target: [ 'es2020' ] },
   test: {
     // ...
       environment: "jsdom",

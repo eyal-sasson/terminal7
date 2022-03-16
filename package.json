@@ -28,7 +28,7 @@
     "@capacitor/ios": "<4",
     "@capacitor/network": "^1.0.5",
     "@capacitor/storage": "^1.2.2",
-    "@iarna/toml": "git+https://github.com/tuzig/iarna-toml.git",
+    "@ltd/j-toml": "^1.30.0",
     "@robingenz/capacitor-background-task": "^1.0.0",
     "codemirror": "git+https://github.com/tuzig/CodeMirror.git",
     "glob": "<8",
