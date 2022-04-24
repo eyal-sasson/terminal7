@@ -9,8 +9,7 @@ import { Window } from './window.js'
 import { Pane } from './pane.js'
 import { Session } from './session'
 import { Clipboard } from '@capacitor/clipboard'
-import { WSSession, PeerbookSession } from './webrtc_session'
-import { SSHSession } from './ssh_session'
+import { WSSession, PeerbookSession, SSHWebRTCSession  } from './webrtc_session'
 
 import { Storage } from '@capacitor/storage'
 
@@ -555,8 +554,9 @@ export class Gate {
         e.querySelector('[name="pass"]').focus()
     }
     completeConnect(pass: string): void {
-        // TODO: why is pass undefined?
-        this.session = new SSHSession(this.addr, this.username, pass)
+        // TODO: be smart about choosing comm method
+        // this.session = new SSHSession(this.addr, this.username, pass)
+        this.session = new SSHWebRTCSession(this.addr, this.username, pass)
         this.session.onStateChange = state => this.onSessionState(state)
         this.session.onPayloadUpdate = layout => {
             this.notify("TBD: update new layout")

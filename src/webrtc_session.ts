@@ -1,4 +1,6 @@
+import { SSH } from 'capacitor-ssh-plugin'
 import { BaseSession, BaseChannel, Channel, ChannelID, CallbackType }  from './session' 
+import { SSHChannel }  from './ssh_session' 
 import { Clipboard } from '@capacitor/clipboard'
 
 const TIMEOUT = 5000
@@ -91,6 +93,39 @@ abstract class WebRTCSession extends BaseSession {
     onIceCandidate(ev: RTCPeerConnectionIceEvent) {
             return
     }
+    getIceServers() {
+        return new Promise((resolve, reject) => {
+            if (!terminal7.conf.net.peerbook) {
+                resolve([{ urls: this.t7.conf.net.iceServer}])
+                return
+            }
+            const ctrl = new AbortController(),
+                  tId = setTimeout(() => ctrl.abort(), TIMEOUT),
+                  insecure = this.t7.conf.peerbook.insecure,
+                  schema = insecure?"http":"https"
+
+            fetch(`${schema}://${this.t7.conf.net.peerbook}/turn`,
+                  {method: 'POST', signal: ctrl.signal })
+            .then(response => {
+                if (!response.ok) {
+                    console.log(`HTTP POST to get TURN servers failed with status ${response.status}`)
+                    return null
+                }
+                return response.text()
+            }).then(data => {
+                clearTimeout(tId)
+                const answer = (typeof data =='string')?JSON.parse(data):[]
+                // return an array with the conf's server and subspace's
+                resolve([{ urls: this.t7.conf.net.iceServer},
+                         ...answer["ice_servers"]])
+
+            }).catch(err => {
+                console.log("failed to get ice servers " + err.toString())
+                clearTimeout(tId)
+                resolve([{ urls: this.t7.conf.net.iceServer}])
+            })
+        })
+    }
     /*
      * disengagePC silently removes all event handler from the peer connections
      */
@@ -113,8 +148,9 @@ abstract class WebRTCSession extends BaseSession {
             }
         }
         console.log("got ice server", this.t7.iceServers)
+        await this.t7.getFingerprint()
         this.pc = new RTCPeerConnection({
-            iceServers: this.t7.iceServer,
+            iceServers: this.t7.iceServers,
             certificates: this.t7.certificates})
         this.pc.onconnectionstatechange = () => {
             const state = this.pc.connectionState
@@ -339,37 +375,14 @@ abstract class WebRTCSession extends BaseSession {
             }, reject)
         })
     }
+    peerCandidate(candidate) {
+        this.pc.addIceCandidate(candidate).catch(e =>
+            this.t7.notify(`ICE candidate error: ${e}`))
+        return
+    }
 }
 
 export class PeerbookSession extends WebRTCSession {
-    getIceServers() {
-        return new Promise((resolve, reject) => {
-            const ctrl = new AbortController(),
-                  tId = setTimeout(() => ctrl.abort(), TIMEOUT),
-                  insecure = this.t7.conf.peerbook.insecure,
-                  schema = insecure?"http":"https"
-
-            fetch(`${schema}://${this.t7.conf.net.peerbook}/turn`,
-                  {method: 'POST', signal: ctrl.signal })
-            .then(response => {
-                if (!response.ok)
-                    throw new Error(
-                      `HTTP POST failed with status ${response.status}`)
-                return response.text()
-            }).then(data => {
-                clearTimeout(tId)
-                const answer = JSON.parse(data)
-                // return an array with the conf's server and subspace's
-                resolve([{ urls: this.t7.conf.net.iceServer},
-                         ...answer["ice_servers"]])
-
-            }).catch(err => {
-                console.log("failed to get ice servers " + err.toString())
-                clearTimeout(tId)
-                reject()
-            })
-        })
-    }
     onIceCandidate(ev: RTCPeerConnectionIceEvent) {
         if (ev.candidate) {
             this.t7.pbSend({target: this.fp, candidate: ev.candidate})
@@ -392,10 +405,65 @@ export class PeerbookSession extends WebRTCSession {
                 this.onStateChange("failed")
             })
     }
-    peerCandidate(candidate) {
-        this.pc.addIceCandidate(candidate).catch(e =>
-            this.t7.notify(`ICE candidate error: ${e}`))
-        return
+}
+
+export class SSHWebRTCSession extends WebRTCSession {
+    sshSession: string
+    setupChannelID: number
+    constructor(address: string, username: string, password: string, port=22) {
+        super()
+        this.byPass = {address: address,
+                       username: username,
+                       password: password,
+                       port: port,
+                      }
+        this.setupChannelID = -1
+        this.pendingCandidates = []
+    }
+    onNegotiationNeeded(e) {
+        this.t7.log("on negotiation needed", e)
+        this.pc.createOffer().then(d => {
+            const offer = btoa(JSON.stringify(d))
+            this.pc.setLocalDescription(d)
+            this.t7.log("got offer", offer)
+            SSH.startSessionByPasswd(this.byPass).then(({ session }) => {
+                console.log("Got ssh session", session)
+                this.sshSession = session
+                // SSH.startCommand({session: session, command: "/usr/local/bin/webexec accept"},
+                SSH.startCommand({session: session, command: "/usr/local/bin/webexec accept"},
+                    m => {
+                        this.t7.log("webexec sent:", m)
+                        if ((!m) || (m.EOF))
+                            console.log("stream command finished", m)
+                        else if ('data' in m)
+                            this.peerCandidate(JSON.parse(m.data))
+                    }
+                ).then(id => {
+                    setTimeout(() => {
+                        this.setupChannelID = id
+                        this.pendingCandidates.forEach(m => 
+                            SSH.writeToChannel({channel: this.setupChannelID, message: m}))
+                        this.pendingCandidates = []
+                    }, 200)
+                })
+                .catch(e => {
+                    console.log("failed webexec ", e)
+                    this.onStateChange("unsupported") 
+                })
+           }).catch(e => {
+               console.log("SSH startSession failed", e)
+               this.onStateChange("wrong password")
+           })
+        })
+    }
+    onIceCandidate(ev: RTCPeerConnectionIceEvent) {
+        if (ev.candidate) {
+            const m = JSON.stringify(ev.candidate)
+            if (this.setupChannelID < 0)
+                this.pendingCandidates.push(m)
+            else 
+                SSH.writeToChannel({channel: this.setupChannelID, message: m})
+        }
     }
 }
 
@@ -452,10 +520,6 @@ export class WSSession extends WebRTCSession {
             )
 
         })
-    }
-    getIceServers() {
-        return new Promise((resolve, reject) =>
-            resolve([{ urls: this.t7.conf.net.iceServer}]))
     }
 }
 

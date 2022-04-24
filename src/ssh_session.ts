@@ -40,13 +40,43 @@ export class SSHSession extends BaseSession {
            .then(({ session }) => {
                console.log("Got ssh session", session)
                 this.id = session
-                this.onStateChange("connected")
+                self.tryWebexec()
+                    .catch(() => this.onStateChange("connected"))
            }).catch(e => {
                console.log("SSH startSession failed", e)
                this.onStateChange("wrong password")
            })
     }
 
+    tryWebexec() {
+        return new Promise((resolve, reject) => {
+            let newC
+            const channel = new SSHChannel()
+            SSH.newChannel({session: this.id})
+               .then(({ id }) => {
+                channel.id = id
+                SSH.streamCommand({channel: id, command: "webexec"},
+                    m => {
+                        if ((!m) || (m.EOF) || ('ERROR' in m)) {
+                            console.log("stream command finished", m)
+                            channel.onClose("Shell closed")
+                        } else 
+                            channel.onMessage(m)
+                    })
+                   .then(callbackID => {
+                        console.log("got from startShell: ", callbackID)
+                        resolve(channel, id)
+                        SSH.setPtySize({channel: id, width: sx, height: sy})
+                           .then(() => {
+                            console.log("after setting size")
+                            resolve(channel, id)
+                           })
+
+                    }).catch(e => { console.log("failed startshell", e); reject(e) })
+                })
+        })
+
+    }
     openChannel(cmd: string, parent?: ChannelID, sx?: number, sy?: number):
          Promise<Channel> {
         return new Promise((resolve, reject) => {

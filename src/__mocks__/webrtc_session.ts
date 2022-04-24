@@ -15,7 +15,9 @@ class MockChannel implements Channel {
     }
 }
 
-export class WSSession implements Session {
+// TODO: restore:
+//  export class WSSession implements Session {
+export class SSHWebRTCSession implements Session {
     onStateChange: (state: State) => void
     onPayloadUpdate: (payload: string) => void
     constructor(address: string, username: string, password: string, port?=22) {
