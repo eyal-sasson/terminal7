@@ -18,7 +18,7 @@ The code here is mainly ES6 with no framworks. We do use the following projects:
 - vite for packaging
 - vitest for testing
 
-For networking we use WebRTC, the web standard protocol for real time
+For networking we use SSH or WebRTC, the web standard protocol for real time
 communications. It's a UDP based web-era protocol with wide support and a great
 implmentation in go - [pion/webrtc](https://github.com/pion/webrtc) - that we use as a base for our server's daemon.
 
