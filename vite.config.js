@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
@@ -7,6 +8,7 @@ export default defineConfig({
       environment: "jsdom",
       reporters: "verbose",
       globals: true,
+      exclude: [ ...configDefaults.exclude, 'qa/**' ]
   },
   plugins: [
     VitePWA({
