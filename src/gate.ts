@@ -47,7 +47,7 @@ export class Gate {
     online: boolean
     store: boolean
     map: T7Map
-    useSSH: boolean
+    onlySSH: boolean
 
     constructor (props) {
         // given properties
@@ -76,6 +76,7 @@ export class Gate {
         this.t7 = window.terminal7
         this.map = this.t7.map
         this.session = null
+        this.onlySSH = props.onlySSH || false
     }
 
     /*
@@ -154,7 +155,8 @@ export class Gate {
                         default: this.addr,
                         validator: (a) => this.t7.validateHostAddress(a)
                     },
-                    { prompt: "Username", default: this.username }
+                    { prompt: "Username", default: this.username },
+                    { prompt: "SSH only", values: ["y", "n"], default: this.onlySSH?"y":"n" },
                 ])
                 const fDel = new Form([{
                     prompt: `Delete ${this.name}?`,
@@ -176,9 +178,10 @@ export class Gate {
                                         return
                                     }
                                     f2.start(this.map.t0).then(results => {
-                                        ['name', 'addr', 'username']
+                                        ['name', 'addr', 'username', 'onlySSH']
                                             .filter((_, i) => enabled[i])
                                             .forEach((k, i) => this[k] = results[i])
+                                        this.onlySSH = this.onlySSH == 'y'
                                         if (enabled[1]) {
                                             this.t7.gates.delete(this.id)
                                             this.id = this.addr
@@ -656,7 +659,7 @@ export class Gate {
         authForm.start(this.map.t0).then(res => {
             this.username = res[0]
             this.pass = res[1]
-            if (this.useSSH) 
+            if (this.onlySSH)
                 this.completeConnect()
             else {
                 const webexecForm = new Form([
@@ -665,9 +668,9 @@ export class Gate {
                     { prompt: "Always use SSH for this host" },
                 ])
                 const cmd = "bash -c $(curl -sL https://get.webexec.sh)"
-                this.map.t0.writeln("  You are connecting with SSH. While it works, with WebRTC you get much more.")
-                this.map.t0.writeln("  To install webexec, our open source WebRTC server, run:")
-                this.map.t0.writeln(`  \x1B[1m${cmd}\x1B[0m`)
+                this.map.t0.writeln("\n  For real time communications and advanced features")
+                this.map.t0.writeln("  please install webexec on your server")
+                this.map.t0.writeln(`    \x1B[1m${cmd}\x1B[0m`)
                 webexecForm.menu(this.map.t0).then(res => {
                     switch(res) {
                         case "Copy it to clipboard & connect":
@@ -678,7 +681,7 @@ export class Gate {
                             this.completeConnect()
                             break
                         case "Always use SSH for this host":
-                            this.useSSH = true
+                            this.onlySSH = true
                             this.completeConnect()
                             break
                     }
@@ -689,22 +692,22 @@ export class Gate {
     completeConnect(): void {
         if (Form.activeForm)
             Form.activeForm.escape(this.map.t0)
-            if (this.fp) {
-                this.notify("🎌  PeerBook")
-                this.session = new PeerbookSession(this.fp, this.t7.pb)
+        if (this.fp) {
+            this.notify("🎌  PeerBook")
+            this.session = new PeerbookSession(this.fp, this.t7.pb)
+        }
+        else {
+            if (!this.onlySSH && this.tryWebexec) {
+                this.notify("🎌  webexec server")
+                this.session = new HTTPWebRTCSession(this.fp, this.addr)
+            } else {
+                this.clear()
+                this.notify("Starting SSH session")
+                this.session = new SSHSession(this.addr, this.username, this.pass)
+                // next time go back to trying webexec
+                this.tryWebexec = true
             }
-            else {
-                if (this.tryWebexec) {
-                    this.notify("🎌  webexec server")
-                    this.session = new HTTPWebRTCSession(this.fp, this.addr)
-                } else {
-                    this.clear()
-                    this.notify("Starting SSH session")
-                    this.session = new SSHSession(this.addr, this.username, this.pass)
-                    // next time go back to trying webexec
-                    this.tryWebexec = true
-                }
-            }
+        }
         this.session.onStateChange = (state, failure?) => this.onSessionState(state, failure)
         this.session.onPayloadUpdate = layout => {
             this.notify("TBD: update new layout")
